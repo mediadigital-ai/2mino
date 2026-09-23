@@ -150,7 +150,7 @@ export function RoundEndDialog({
                 {r.tiles.length > 0 && (
                   <div className="mt-1.5 flex flex-wrap gap-1" style={{ '--u': '17px' } as React.CSSProperties}>
                     {r.tiles.map((t) => (
-                      <DominoTile key={t.id} left={t.x} right={t.y} />
+                      <DominoTile key={t.id} vertical left={t.x} right={t.y} />
                     ))}
                   </div>
                 )}

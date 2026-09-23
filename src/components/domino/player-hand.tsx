@@ -128,7 +128,7 @@ export function PlayerHand({
       {/* Soporte de fichas */}
       <div
         className="rounded-2xl border border-[#2a1808] bg-[linear-gradient(180deg,#5c3a1e_0%,#4a2d14_55%,#38210b_100%)] p-2 shadow-[0_10px_24px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,220,170,0.22)] sm:p-3"
-        style={{ '--u': 'clamp(26px, 7vw, 42px)' } as React.CSSProperties}
+        style={{ '--u': 'clamp(30px, 8vw, 46px)' } as React.CSSProperties}
       >
         {me.hand.length === 0 ? (
           <p className="py-6 text-center text-sm font-semibold text-amber-200/80">¡Mano vacía!</p>
@@ -150,6 +150,7 @@ export function PlayerHand({
                   >
                     <DominoTile
                       as="button"
+                      vertical
                       left={tile.x}
                       right={tile.y}
                       playable={playable}
