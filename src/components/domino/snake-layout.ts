@@ -7,10 +7,10 @@
  *
  * Geometría:
  *  - u: unidad de ficha. Horizontal: 2u × u · Vertical (dobles y giros): u × 2u.
- *  - Banda (fila) k: centro vertical y = u + k·1.5u. Los dobles sobresalen ±u/2
- *    sin invadir la banda contigua.
- *  - Giro (ficha de esquina): vertical, centrada entre dos bandas
- *    (y = centroBanda(k) + 0.75u) cruzando ambas, pegada al extremo.
+ *  - Banda (fila) k: centro vertical y = u + k·2u — deja UNA ficha de espacio
+ *    visible entre filas; los dobles (±u) y los giros nunca rozan la fila contigua.
+ *  - Giro (ficha de esquina): vertical, centrado entre dos bandas
+ *    (y = centroBanda(k) + u) cruzando el hueco, pegada al extremo.
  *  - Frontera central (x = W/2): los carriles impares de cada lado no la cruzan,
  *    así el lado izquierdo y derecho nunca se pisan.
  */
@@ -48,7 +48,7 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
 
   const safeAnchor = Math.min(Math.max(anchorIdx, 0), board.length - 1)
   const half = u / 2
-  const step = 1.5 * u
+  const step = 2 * u
   const cxc = W / 2
   const cy = (k: number) => u + k * step
   const slots = new Map<string, Slot>()
@@ -106,9 +106,9 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
         maxBand = Math.max(maxBand, band)
         x += (dir === 1 ? 1 : -1) * (w + GAP)
       } else {
-        // La ficha no cabe: SE DOBLA en la esquina (vertical, cruzando bandas)
+        // La ficha no cabe: SE DOBLA en la esquina (vertical, cruzando el hueco)
         const gx = cornerPos(band, x)
-        slots.set(t.id, { cx: gx + half, cy: cy(band) + 0.75 * u, vertical: true, flip: false, corner: true })
+        slots.set(t.id, { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: false, corner: true })
         maxBand = Math.max(maxBand, band + 1)
         band++
         const nd = dirOf(band)
@@ -125,7 +125,7 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
     }
     const gx = cornerPos(band, x)
     maxBand = Math.max(maxBand, band + 1)
-    return { cx: gx + half, cy: cy(band) + 0.75 * u, vertical: true, flip: false, corner: true }
+    return { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: false, corner: true }
   }
 
   const nextRight = walk(1)
