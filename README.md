@@ -2,6 +2,8 @@
 
 Webapp del juego de dominó clásico (estilo latino, con robo del montón), pensada para jugar directamente en el navegador contra la máquina o con amigos en el mismo dispositivo.
 
+**Jugar ahora:** [2mino.vercel.app](https://2mino.vercel.app)
+
 ![Captura escritorio](docs/captura-escritorio.png)
 
 ## Características
@@ -60,7 +62,7 @@ bun run start   # o: npm run start
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/mediadigital-ai/2mino)
 
-El proyecto es una aplicación Next.js estándar y se despliega en Vercel sin configuración adicional:
+El proyecto es una aplicación Next.js estándar y se despliega en Vercel sin configuración adicional (ya está en línea en [2mino.vercel.app](https://2mino.vercel.app)):
 
 1. Entra a [vercel.com/new](https://vercel.com/new) con tu cuenta de GitHub.
 2. Importa el repositorio `2mino`.
