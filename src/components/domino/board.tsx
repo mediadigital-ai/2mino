@@ -1,14 +1,16 @@
 'use client'
 
 /**
- * Mesa de fieltro: cadena de fichas, zonas de extremos, montón y overlay de reparto.
+ * Mesa de fieltro: cadena de fichas en serpiente (dobla en las esquinas como
+ * el dominó real), zonas de extremos, montón y overlay de reparto.
  */
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { ChevronLeft, ChevronRight, Layers } from 'lucide-react'
 import type { BoardTile as BTile, End } from '@/lib/domino/types'
 import { cn } from '@/lib/utils'
 import { DominoTile, NumberBadge, TileBack } from './domino-tile'
+import { layoutSnake, type Slot } from './snake-layout'
 
 export interface EndSelection {
   tileId: string
@@ -42,6 +44,51 @@ export function Board({
   onDraw,
 }: BoardProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ w: 0, h: 0 })
+  const [u, setU] = useState(0)
+
+  // Medir el ancho/alto disponible de la mesa (content-box, sin padding)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setSize({ w: e.contentRect.width, h: e.contentRect.height })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Unidad de ficha: misma fórmula que la variable CSS --u del contenedor
+  useEffect(() => {
+    const calc = () => setU(Math.round(Math.max(19, Math.min(34, window.innerWidth * 0.046))))
+    calc()
+    window.addEventListener('resize', calc)
+    return () => window.removeEventListener('resize', calc)
+  }, [])
+
+  // Ancla estable: la ficha de apertura queda en el centro de la mesa.
+  // Dentro de una ronda la cadena solo crece por los extremos, así que las
+  // fichas existentes nunca cambian de lado al recalcular el layout.
+  const anchorIdRef = useRef<string | null>(null)
+  const anchorIdx = useMemo(() => {
+    if (board.length === 0) {
+      anchorIdRef.current = null
+      return -1
+    }
+    const prev = anchorIdRef.current
+    if (prev) {
+      const idx = board.findIndex((t) => t.id === prev)
+      if (idx >= 0) return idx
+    }
+    const idx = Math.floor((board.length - 1) / 2)
+    anchorIdRef.current = board[idx].id
+    return idx
+  }, [board])
+
+  const layout = useMemo(
+    () => (u > 0 && size.w > 0 ? layoutSnake(board, size.w, u, anchorIdx) : null),
+    [board, size.w, u, anchorIdx]
+  )
 
   // Auto-scroll a la última ficha colocada
   useEffect(() => {
@@ -57,7 +104,7 @@ export function Board({
     >
       <div
         ref={scrollRef}
-        className="scrollbar-thin relative flex min-h-[240px] items-center overflow-x-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
+        className="scrollbar-thin relative flex min-h-[240px] flex-col overflow-y-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
         style={{ '--u': 'clamp(19px, 4.6vw, 34px)' } as React.CSSProperties}
       >
         {/* Insignias de extremos */}
@@ -91,9 +138,9 @@ export function Board({
           </button>
         )}
 
-        {/* Cadena de fichas */}
+        {/* Cadena de fichas (serpiente) */}
         {board.length === 0 ? (
-          <div className="flex min-h-[200px] w-full flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
+          <div className="my-auto flex min-h-[200px] w-full flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
             <div className="flex gap-1 opacity-60" aria-hidden="true">
               <DominoTile left={6} right={6} vertical />
               <DominoTile left={5} right={3} />
@@ -105,32 +152,62 @@ export function Board({
             </p>
           </div>
         ) : (
-          <div className="flex w-max min-w-full shrink-0 flex-nowrap items-center justify-center gap-1">
-            {selection?.fitsLeft && (
-              <EndZone end="left" value={board[0].left} onClick={() => onChooseEnd('left')} />
+          <div
+            className="relative my-auto w-full shrink-0"
+            style={
+              {
+                height: layout ? layout.height : 0,
+                '--u': u > 0 ? `${u}px` : 'clamp(19px, 4.6vw, 34px)',
+              } as React.CSSProperties
+            }
+          >
+            {selection?.fitsLeft && layout?.nextLeft && u > 0 && (
+              <EndZone
+                end="left"
+                value={board[0].left}
+                slot={layout.nextLeft}
+                u={u}
+                onClick={() => onChooseEnd('left')}
+              />
             )}
             <AnimatePresence initial={false}>
-              {board.map((t) => (
-                <motion.div
-                  key={t.id}
-                  data-tile-id={t.id}
-                  layout
-                  initial={{ opacity: 0, scale: 1.45, y: -26, rotate: -10 }}
-                  animate={{ opacity: 1, scale: 1, y: 0, rotate: 0 }}
-                  transition={{ type: 'spring', stiffness: 380, damping: 26 }}
-                  className="flex shrink-0 items-center"
-                >
-                  <DominoTile
-                    left={t.left}
-                    right={t.right}
-                    vertical={t.isDouble}
-                    highlight={t.id === lastPlacedId}
-                  />
-                </motion.div>
-              ))}
+              {layout &&
+                u > 0 &&
+                board.map((t) => {
+                  const s = layout.slots.get(t.id)
+                  if (!s) return null
+                  const w = s.vertical ? u : 2 * u
+                  const h = s.vertical ? 2 * u : u
+                  return (
+                    <motion.div
+                      key={t.id}
+                      data-tile-id={t.id}
+                      className={cn('absolute left-0 top-0 will-change-transform', s.corner ? 'z-[3]' : 'z-[2]')}
+                      initial={{ opacity: 0, scale: 1.45, rotate: -8, x: s.cx - w / 2, y: s.cy - h / 2 - 18 }}
+                      animate={{ opacity: 1, scale: 1, rotate: 0, x: s.cx - w / 2, y: s.cy - h / 2 }}
+                      exit={{ opacity: 0, scale: 0.55, transition: { duration: 0.18 } }}
+                      transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                    >
+                      <div style={{ transform: s.flip ? 'scaleX(-1)' : undefined }}>
+                        <DominoTile
+                          left={t.left}
+                          right={t.right}
+                          vertical={s.vertical}
+                          highlight={t.id === lastPlacedId}
+                        />
+                      </div>
+                    </motion.div>
+                  )
+                })}
             </AnimatePresence>
-            {selection?.fitsRight && (
-              <EndZone end="right" value={board[board.length - 1].right} onClick={() => onChooseEnd('right')} />
+            {selection?.fitsRight && layout?.nextRight && u > 0 && (
+              <EndZone
+                end="right"
+                value={board[board.length - 1].right}
+                slot={layout.nextRight}
+                u={u}
+                onClick={() => onChooseEnd('right')}
+              />
             )}
           </div>
         )}
@@ -173,24 +250,48 @@ export function Board({
   )
 }
 
-function EndZone({ end, value, onClick }: { end: End; value: number; onClick: () => void }) {
+function EndZone({
+  end,
+  value,
+  slot,
+  u,
+  onClick,
+}: {
+  end: End
+  value: number
+  slot: Slot
+  u: number
+  onClick: () => void
+}) {
+  const w = slot.vertical ? u : 2 * u
+  const h = slot.vertical ? 2 * u : u
   return (
     <motion.button
       type="button"
-      initial={{ opacity: 0, scale: 0.6 }}
-      animate={{ opacity: 1, scale: [1, 1.06, 1] }}
-      exit={{ opacity: 0, scale: 0.6 }}
-      transition={{ scale: { repeat: Infinity, duration: 1.4 } }}
+      initial={{ opacity: 0, scale: 0.6, x: slot.cx - w / 2, y: slot.cy - h / 2 }}
+      animate={{ opacity: 1, x: slot.cx - w / 2, y: slot.cy - h / 2, scale: [1, 1.05, 1] }}
+      exit={{ opacity: 0, scale: 0.6, transition: { duration: 0.15 } }}
+      transition={{
+        scale: { repeat: Infinity, duration: 1.4 },
+        default: { type: 'spring', stiffness: 320, damping: 26 },
+      }}
       onClick={onClick}
       aria-label={`Colocar ficha en el extremo ${end === 'left' ? 'izquierdo' : 'derecho'} (necesita ${value})`}
-      className="relative z-10 mx-0.5 flex h-[var(--u)] w-[calc(var(--u)*2)] shrink-0 cursor-pointer items-center justify-center gap-1 rounded-[8px] border-2 border-dashed border-amber-300/80 bg-amber-300/15 shadow-[0_0_14px_rgba(251,191,36,0.35)]"
+      className="absolute left-0 top-0 z-[4] flex cursor-pointer items-center justify-center rounded-[8px] border-2 border-dashed border-amber-300/80 bg-amber-300/15 shadow-[0_0_14px_rgba(251,191,36,0.35)]"
+      style={{ width: w, height: h }}
     >
-      {end === 'left' ? (
-        <ChevronLeft className="h-4 w-4 text-amber-100" aria-hidden="true" />
+      {slot.vertical ? (
+        <NumberBadge value={value} className="h-5 w-5 text-[11px]" />
       ) : (
-        <ChevronRight className="h-4 w-4 text-amber-100" aria-hidden="true" />
+        <>
+          {end === 'left' ? (
+            <ChevronLeft className="h-4 w-4 text-amber-100" aria-hidden="true" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-amber-100" aria-hidden="true" />
+          )}
+          <NumberBadge value={value} />
+        </>
       )}
-      <NumberBadge value={value} />
     </motion.button>
   )
 }
