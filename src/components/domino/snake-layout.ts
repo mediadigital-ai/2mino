@@ -72,10 +72,13 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
     const more = () => (side === 1 ? i < board.length : i >= 0)
 
     const dirOf = (b: number) => (b % 2 === 0 ? side : -side)
+    // Reserva para la ficha de giro: toda fila deja sitio al final para poder
+    // doblar sin pisar la última ficha colocada (hueco de una ficha vertical).
+    const R = u + GAP
     const limitOf = (b: number) => {
       const dir = dirOf(b)
-      if (dir === 1) return b % 2 === 0 && side === 1 ? W : cxc
-      return b % 2 === 0 && side === -1 ? 0 : cxc
+      if (dir === 1) return (b % 2 === 0 && side === 1 ? W : cxc) - R
+      return (b % 2 === 0 && side === -1 ? 0 : cxc) + R
     }
     const fits = (w: number, b: number, xx: number) => {
       const lim = limitOf(b)
