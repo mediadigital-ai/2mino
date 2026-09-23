@@ -57,7 +57,7 @@ export function Board({
     >
       <div
         ref={scrollRef}
-        className="scrollbar-thin relative min-h-[240px] overflow-y-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
+        className="scrollbar-thin relative flex min-h-[240px] items-center overflow-x-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
         style={{ '--u': 'clamp(19px, 4.6vw, 34px)' } as React.CSSProperties}
       >
         {/* Insignias de extremos */}
@@ -93,7 +93,7 @@ export function Board({
 
         {/* Cadena de fichas */}
         {board.length === 0 ? (
-          <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
+          <div className="flex min-h-[200px] w-full flex-col items-center justify-center gap-3 text-center sm:min-h-[280px]">
             <div className="flex gap-1 opacity-60" aria-hidden="true">
               <DominoTile left={6} right={6} vertical />
               <DominoTile left={5} right={3} />
@@ -105,7 +105,7 @@ export function Board({
             </p>
           </div>
         ) : (
-          <div className="flex flex-wrap items-center justify-center gap-x-1 gap-y-1.5 py-4">
+          <div className="flex w-max min-w-full shrink-0 flex-nowrap items-center justify-center gap-1">
             {selection?.fitsLeft && (
               <EndZone end="left" value={board[0].left} onClick={() => onChooseEnd('left')} />
             )}
