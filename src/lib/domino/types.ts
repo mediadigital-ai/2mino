@@ -90,7 +90,7 @@ export interface GameState {
   lacks: number[][]
 }
 
-export const AI_NAMES = ['Lucía', 'Carlos', 'Marta'] as const
+export const AI_NAMES = ['Juan Pablo Duarte', 'Carlos', 'Marta'] as const
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   facil: 'Fácil',
