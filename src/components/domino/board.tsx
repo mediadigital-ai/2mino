@@ -66,28 +66,9 @@ export function Board({
     return () => window.removeEventListener('resize', calc)
   }, [])
 
-  // Ancla estable: la ficha de apertura queda en el centro de la mesa.
-  // Dentro de una ronda la cadena solo crece por los extremos, así que las
-  // fichas existentes nunca cambian de lado al recalcular el layout.
-  const anchorIdRef = useRef<string | null>(null)
-  const anchorIdx = useMemo(() => {
-    if (board.length === 0) {
-      anchorIdRef.current = null
-      return -1
-    }
-    const prev = anchorIdRef.current
-    if (prev) {
-      const idx = board.findIndex((t) => t.id === prev)
-      if (idx >= 0) return idx
-    }
-    const idx = Math.floor((board.length - 1) / 2)
-    anchorIdRef.current = board[idx].id
-    return idx
-  }, [board])
-
   const layout = useMemo(
-    () => (u > 0 && size.w > 0 ? layoutSnake(board, size.w, u, anchorIdx) : null),
-    [board, size.w, u, anchorIdx]
+    () => (u > 0 && size.w > 0 ? layoutSnake(board, size.w, u) : null),
+    [board, size.w, u]
   )
 
   // Auto-scroll a la última ficha colocada
@@ -104,7 +85,7 @@ export function Board({
     >
       <div
         ref={scrollRef}
-        className="scrollbar-thin relative flex min-h-[240px] flex-col overflow-y-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
+        className="scrollbar-thin relative flex min-h-[240px] flex-col overflow-x-hidden overflow-y-auto rounded-xl bg-[radial-gradient(ellipse_at_50%_38%,#1f7550_0%,#155c3a_52%,#0b3d26_100%)] p-3 sm:min-h-[320px] sm:p-5"
         style={{ '--u': 'clamp(19px, 4.6vw, 34px)' } as React.CSSProperties}
       >
         {/* Insignias de extremos */}
