@@ -11,6 +11,14 @@
  *    visible entre filas; los dobles (±u) y los giros nunca rozan la fila contigua.
  *  - Giro (ficha de esquina): vertical, centrado entre dos bandas
  *    (y = centroBanda(k) + u) cruzando el hueco, pegada al extremo.
+ *
+ * Orientación de los valores: la cadena respeta board[i].right === board[i+1].left
+ * en pantalla. En las filas "de ida" las fichas van sin espejo (el orden físico
+ * izquierda→derecha coincide con el orden de la cadena) y en las filas "de vuelta"
+ * van espejadas (scaleX): la cadena se tiende en orden inverso. Un giro del lado
+ * izquierdo toca la fila anterior por la mitad IZQUIERDA de la ficha previa, así
+ * que se dibuja con los valores intercambiados (arriba = right).
+ *
  *  - Frontera central (x = W/2): los carriles impares de cada lado no la cruzan,
  *    así el lado izquierdo y derecho nunca se pisan.
  */
@@ -23,7 +31,10 @@ export interface Slot {
   cy: number
   /** ficha girada (giro de esquina o doble perpendicular) */
   vertical: boolean
-  /** espejo horizontal: la cadena avanza hacia la izquierda */
+  /**
+   * Espejo: en fichas horizontales invierte izquierda/derecha (fila de vuelta);
+   * en giros verticales intercambia arriba/abajo (solo lado izquierdo).
+   */
   flip: boolean
   /** es una ficha de giro entre dos bandas */
   corner: boolean
@@ -103,15 +114,19 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
           cx: dir === 1 ? x + w / 2 : x - w / 2,
           cy: cy(band),
           vertical: t.isDouble,
-          flip: dir === -1 && !t.isDouble,
+          // Fila de ida (dir === side): orden físico = orden de cadena, sin espejo.
+          // Fila de vuelta (dir !== side): cadena en orden inverso, se espeja.
+          flip: dir !== side && !t.isDouble,
           corner: false,
         })
         maxBand = Math.max(maxBand, band)
         x += (dir === 1 ? 1 : -1) * (w + GAP)
       } else {
-        // La ficha no cabe: SE DOBLA en la esquina (vertical, cruzando el hueco)
+        // La ficha no cabe: SE DOBLA en la esquina (vertical, cruzando el hueco).
+        // En el lado izquierdo el contacto con la fila previa es por la mitad
+        // izquierda de la ficha previa → el giro se dibuja con valores intercambiados.
         const gx = cornerPos(band, x)
-        slots.set(t.id, { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: false, corner: true })
+        slots.set(t.id, { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: side === -1, corner: true })
         maxBand = Math.max(maxBand, band + 1)
         band++
         const nd = dirOf(band)
@@ -124,11 +139,11 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
     const dir = dirOf(band)
     if (fits(2 * u, band, x)) {
       maxBand = Math.max(maxBand, band)
-      return { cx: dir === 1 ? x + u : x - u, cy: cy(band), vertical: false, flip: dir === -1, corner: false }
+      return { cx: dir === 1 ? x + u : x - u, cy: cy(band), vertical: false, flip: dir !== side, corner: false }
     }
     const gx = cornerPos(band, x)
     maxBand = Math.max(maxBand, band + 1)
-    return { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: false, corner: true }
+    return { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: side === -1, corner: true }
   }
 
   const nextRight = walk(1)

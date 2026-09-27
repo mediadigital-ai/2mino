@@ -188,10 +188,10 @@ export function Board({
                       exit={{ opacity: 0, scale: 0.55, transition: { duration: 0.18 } }}
                       transition={{ type: 'spring', stiffness: 320, damping: 26 }}
                     >
-                      <div style={{ transform: s.flip ? 'scaleX(-1)' : undefined }}>
+                      <div style={{ transform: s.flip && !s.vertical ? 'scaleX(-1)' : undefined }}>
                         <DominoTile
-                          left={t.left}
-                          right={t.right}
+                          left={s.vertical && s.flip ? t.right : t.left}
+                          right={s.vertical && s.flip ? t.left : t.right}
                           vertical={s.vertical}
                           highlight={t.id === lastPlacedId}
                         />
