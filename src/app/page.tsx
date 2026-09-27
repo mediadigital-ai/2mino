@@ -135,6 +135,7 @@ export default function Home() {
             boneyardCount={state.boneyard.length}
             canDraw={mustDraw}
             starterName={state.players[state.current]?.name ?? ''}
+            anchorId={state.anchorTileId}
             onChooseEnd={(end: End) => actions.chooseEnd(end)}
             onDraw={() => actions.draw()}
           />

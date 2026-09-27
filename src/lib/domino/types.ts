@@ -80,6 +80,8 @@ export interface GameState {
   lastPlacedId: string | null
   /** Ficha forzada de apertura de ronda (doble más alto o ficha más alta) */
   forcedTileId: string | null
+  /** Ficha de apertura de la ronda (ancla del layout: se queda en el centro de la mesa) */
+  anchorTileId: string | null
   /** Contador de acciones: protege los efectos async (StrictMode / duplicados) */
   seq: number
   /** Fichas robadas este turno (para UI/log) */

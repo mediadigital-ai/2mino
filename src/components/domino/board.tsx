@@ -28,6 +28,8 @@ interface BoardProps {
   boneyardCount: number
   canDraw: boolean
   starterName: string
+  /** Ficha de apertura de la ronda: ancla que se queda en el centro de la mesa */
+  anchorId: string | null
   onChooseEnd: (end: End) => void
   onDraw: () => void
 }
@@ -40,6 +42,7 @@ export function Board({
   boneyardCount,
   canDraw,
   starterName,
+  anchorId,
   onChooseEnd,
   onDraw,
 }: BoardProps) {
@@ -67,8 +70,8 @@ export function Board({
   }, [])
 
   const layout = useMemo(
-    () => (u > 0 && size.w > 0 ? layoutSnake(board, size.w, u) : null),
-    [board, size.w, u]
+    () => (u > 0 && size.w > 0 ? layoutSnake(board, size.w, u, anchorId) : null),
+    [board, size.w, u, anchorId]
   )
 
   // Auto-scroll a la última ficha colocada

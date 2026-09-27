@@ -1,32 +1,31 @@
 /**
- * Layout "serpiente" CONTINUO del tablero de dominó (como en la mesa real).
+ * Layout "serpiente" BILATERAL del tablero de dominó (como en la mesa real).
  *
- * La cadena completa (board[0] → board[n-1]) se tiende como UNA sola línea,
- * igual que un texto que salta de renglón:
- *  - Las fichas se colocan en orden de cadena, siempre PEGADAS a la anterior
- *    (separadas solo GAP de cortesía). Nunca hay huecos ni filas a medias.
- *  - Cuando la siguiente ficha ya no cabe en la fila, esa ficha SE DOBLA:
- *    se planta vertical al final de la fila (cruzando hacia el renglón
- *    siguiente) y la cadena continúa por la fila de abajo en dirección
- *    contraria, arrancando justo a su lado. Como en la mesa real.
- *  - Cada fila reserva u + GAP al final mientras queden fichas por colocar,
- *    de modo que la ficha de giro siempre quepa pegada a la última ficha.
+ * La ficha de APERTURA (ancla) se planta en el CENTRO exacto de la mesa y la
+ * cadena crece en ambos sentidos desde ella:
+ *  - Brazo DERECHO (board[ancla..n-1]): crece hacia la derecha en la fila
+ *    central; al llegar al borde dobla hacia ABAJO (fila 1, 2, 3…) como
+ *    serpiente.
+ *  - Brazo IZQUIERDO (board[0..ancla] recorrido al revés): crece hacia la
+ *    izquierda en la fila central; al llegar al borde dobla hacia ARRIBA
+ *    (fila -1, -2…).
+ *  - Al ocupar cada brazo franjas de filas DISJUNTAS (uno baja, el otro sube)
+ *    jamás se cruzan: no hay colisiones ni huecos de frontera.
  *
  * Geometría:
  *  - u: unidad de ficha. Horizontal: 2u × u · Vertical (dobles y giros): u × 2u.
- *  - Fila k: centro vertical y = u + k·2u — queda una ficha de fieltro entre
- *    filas; los dobles (perpendicular) y los giros nunca rozan la fila contigua.
- *  - Giro (ficha de esquina): vertical, centrado entre dos filas
- *    (y = centroFila(k) + u); arriba muestra `left` (conecta con la fila k) y
- *    abajo `right` (conecta con la fila k+1).
+ *  - Fila k: centro vertical y = shift + k·2u. Una ficha de fieltro entre filas;
+ *    los dobles (perpendiculares) y los giros nunca rozan la fila contigua.
+ *  - Giro (ficha de esquina): vertical, centrado entre dos filas; arriba
+ *    muestra `left` y abajo `right` (igual en ambos brazos, porque el giro del
+ *    brazo izquierdo deja la fila que abandona en su mitad INFERIOR).
  *
  * Orientación de los valores: la cadena respeta board[i].right === board[i+1].left
- * en pantalla. En las filas de ida (izquierda→derecha) las fichas van sin espejo;
- * en las filas de vuelta (derecha→izquierda) van espejadas (scaleX) porque la
- * cadena se tiende en orden inverso.
+ * en pantalla. Regla general por brazo: las filas que avanzan en el sentido
+ * inicial del brazo van sin espejo; las filas de vuelta van espejadas (scaleX).
  *
- * Zonas de colocación (nextLeft / nextRight): se calculan tendiendo la cadena
- * con una ficha virtual añadida al extremo correspondiente, de modo que la
+ * Zonas de colocación (nextLeft / nextRight): se calculan tendiendo el brazo
+ * correspondiente con una ficha virtual añadida al extremo, de modo que la
  * zona aparece EXACTAMENTE donde aterrizará la ficha al jugarla.
  */
 import type { BoardTile } from '@/lib/domino/types'
@@ -61,32 +60,47 @@ const GAP = 2
 
 interface PathResult {
   slots: Map<string, Slot>
-  /** fila más baja alcanzada (los giros cuentan como fila k+1) */
+  /** fila más baja alcanzada (los giros cuentan como fila k+rowStep) */
   maxRow: number
+  /** fila más alta alcanzada */
+  minRow: number
+}
+
+interface ArmOptions {
+  /** borde de la primera ficha: para dir=1 su borde IZQUIERDO; para dir=-1 su borde DERECHO */
+  cursor: number
+  /** sentido inicial del brazo en la fila central */
+  startDir: 1 | -1
+  /** centro y de la fila central (fila 0 del brazo) */
+  cy0: number
+  /** +1: las filas del brazo avanzan hacia abajo · -1: hacia arriba */
+  rowStep: 1 | -1
 }
 
 /**
- * Tiende las fichas (en orden de cadena) sobre el camino serpenteante.
- * Devuelve el slot de cada ficha y la fila más baja usada.
+ * Tiende UN brazo (en orden desde el ancla) sobre su serpiente.
+ * Devuelve el slot de cada ficha y el rango de filas usado.
  */
-function pathSlots(tiles: BoardTile[], W: number, u: number): PathResult {
+function pathArm(tiles: BoardTile[], W: number, u: number, opts: ArmOptions): PathResult {
   const slots = new Map<string, Slot>()
   const step = 2 * u
   const half = u / 2
-  const cy = (k: number) => u + k * step
+  // La fila k siempre está en y = cy0 + k·step: k negativos (brazo izquierdo)
+  // quedan ARRIBA del centro y k positivos (brazo derecho) ABAJO. rowStep solo
+  // decide hacia qué fila avanza cada brazo (kNext = k + rowStep).
+  const cyOf = (k: number) => opts.cy0 + k * step
   let maxRow = 0
-  if (tiles.length === 0 || W < 2 * u) return { slots, maxRow }
+  let minRow = 0
+  if (tiles.length === 0 || W < 2 * u) return { slots, maxRow, minRow }
 
   let k = 0
-  let dir: 1 | -1 = 1 // fila 0: izquierda → derecha
-  // cursor: para dir=1, borde IZQUIERDO de la próxima ficha;
-  //         para dir=-1, borde DERECHO de la próxima ficha.
-  let cursor = 0
+  let dir: 1 | -1 = opts.startDir
+  let cursor = opts.cursor
 
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i]
     const w = t.isDouble ? u : 2 * u
-    // Reserva de giro: mientras queden fichas en la cadena, la fila guarda
+    // Reserva de giro: mientras queden fichas en el brazo, la fila guarda
     // espacio u + GAP al final para que el giro quepa pegado a la última ficha.
     const reserve = i < tiles.length - 1 ? u + GAP : 0
     const fits = dir === 1 ? cursor + w + reserve <= W : cursor - w - reserve >= 0
@@ -95,57 +109,109 @@ function pathSlots(tiles: BoardTile[], W: number, u: number): PathResult {
       const x0 = dir === 1 ? cursor : cursor - w
       slots.set(t.id, {
         cx: x0 + w / 2,
-        cy: cy(k),
+        cy: cyOf(k),
         vertical: t.isDouble,
-        // Fila de ida: sin espejo. Fila de vuelta: espejada (los dobles son
-        // simétricos, no la necesitan).
-        flip: dir === -1 && !t.isDouble,
+        // Fila en el sentido inicial del brazo: sin espejo.
+        // Fila de vuelta: espejada (los dobles son simétricos, no la necesitan).
+        flip: dir !== opts.startDir && !t.isDouble,
         corner: false,
       })
       maxRow = Math.max(maxRow, k)
+      minRow = Math.min(minRow, k)
       cursor = dir === 1 ? x0 + w + GAP : x0 - GAP
     } else {
-      // Giro de esquina: vertical al final de la fila, cruzando al renglón
-      // siguiente. Arriba = left (toca a la fila k), abajo = right (toca a la k+1).
+      // Giro de esquina: vertical al final de la fila, cruzando a la fila
+      // contigua (abajo si el brazo baja, arriba si sube). Arriba = left,
+      // abajo = right en ambos brazos.
       const gx = dir === 1 ? Math.min(cursor, W - u) : Math.max(cursor - u, 0)
+      const kNext = k + opts.rowStep
       slots.set(t.id, {
         cx: gx + half,
-        cy: cy(k) + u,
+        cy: cyOf(k) + opts.rowStep * u,
         vertical: true,
         flip: false,
         corner: true,
       })
-      maxRow = Math.max(maxRow, k + 1)
-      k += 1
+      maxRow = Math.max(maxRow, kNext)
+      minRow = Math.min(minRow, kNext)
+      k = kNext
       dir = dir === 1 ? -1 : 1
       cursor = dir === 1 ? gx + u + GAP : gx - GAP
     }
   }
-  return { slots, maxRow }
+  return { slots, maxRow, minRow }
 }
 
-export function layoutSnake(board: BoardTile[], W: number, u: number): SnakeLayout {
+/**
+ * Divide la cadena en los dos brazos según el índice del ancla y calcula
+ * las secuencias (sin incluir el ancla en el brazo izquierdo).
+ */
+function armSequences(board: BoardTile[], anchorIdx: number) {
+  const rightSeq = board.slice(anchorIdx)
+  const leftSeq = board.slice(0, anchorIdx + 1).reverse().slice(1)
+  return { rightSeq, leftSeq }
+}
+
+export function layoutSnake(
+  board: BoardTile[],
+  W: number,
+  u: number,
+  anchorId?: string | null
+): SnakeLayout {
   const empty: SnakeLayout = { slots: new Map(), height: 0, nextLeft: null, nextRight: null }
   if (board.length === 0 || W <= 0 || u <= 0) return empty
   if (W < u * 4) return empty
 
-  const base = pathSlots(board, W, u)
+  // Ancla = ficha de apertura de la ronda. Si no se conoce (uso interno o
+  // cadenas sintéticas), se toma la ficha central de la cadena.
+  let anchorIdx = anchorId ? board.findIndex((t) => t.id === anchorId) : -1
+  if (anchorIdx < 0) anchorIdx = Math.floor((board.length - 1) / 2)
 
-  // Zonas de colocación: tendemos la cadena con una ficha virtual en cada
+  const anchor = board[anchorIdx]
+  // Semiancho del ancla: u si es horizontal, u/2 si es doble (vertical)
+  const ahw = anchor.isDouble ? u / 2 : u
+  const cx = W / 2
+
+  const { rightSeq, leftSeq } = armSequences(board, anchorIdx)
+
+  // cy0 provisional (0); al final se desplaza todo para que la fila superior empiece en 0
+  const cy0 = 0
+  // El ancla se coloca a mano, EXACTAMENTE en el centro (nunca es giro).
+  // Ambos brazos excluyen el ancla y arrancan pegados a sus bordes.
+  const anchorSlot: Slot = { cx, cy: cy0, vertical: anchor.isDouble, flip: false, corner: false }
+  const armR: ArmOptions = { cursor: cx + ahw + GAP, startDir: 1, cy0, rowStep: 1 }
+  const armL: ArmOptions = { cursor: cx - ahw - GAP, startDir: -1, cy0, rowStep: -1 }
+
+  const right = pathArm(rightSeq.slice(1), W, u, armR)
+  const left = pathArm(leftSeq, W, u, armL)
+
+  // Zonas de colocación: tendemos cada brazo con una ficha virtual en su
   // extremo y leemos dónde aterriza. Es la posición EXACTA de destino.
   const ghostR: BoardTile = { id: '__ghost_right__', left: 0, right: 0, isDouble: false }
-  const withRight = pathSlots([...board, ghostR], W, u)
+  const withRight = pathArm([...rightSeq.slice(1), ghostR], W, u, armR)
   const nextRight = withRight.slots.get(ghostR.id) ?? null
 
   const ghostL: BoardTile = { id: '__ghost_left__', left: 0, right: 0, isDouble: false }
-  const withLeft = pathSlots([ghostL, ...board], W, u)
+  const withLeft = pathArm([...leftSeq, ghostL], W, u, armL)
   const nextLeft = withLeft.slots.get(ghostL.id) ?? null
 
-  const maxRow = Math.max(
-    base.maxRow,
-    nextRight ? withRight.maxRow : 0,
-    nextLeft ? withLeft.maxRow : 0
-  )
-  const height = 2 * u + maxRow * 2 * u
-  return { slots: base.slots, height, nextLeft, nextRight }
+  // Desplazamiento vertical: la fila más alta (podría ser negativa, brazo
+  // izquierdo hacia arriba) queda con su banda empezando en y=0.
+  const minRow = Math.min(0, left.minRow, withLeft.minRow)
+  const maxRow = Math.max(0, right.maxRow, left.maxRow, withRight.maxRow, withLeft.maxRow)
+  const shift = u - minRow * 2 * u
+
+  const slots = new Map<string, Slot>()
+  const shiftSlot = (s: Slot): Slot => ({ ...s, cy: s.cy + shift })
+  slots.set(anchor.id, shiftSlot(anchorSlot))
+  for (const [id, s] of right.slots) slots.set(id, shiftSlot(s))
+  for (const [id, s] of left.slots) slots.set(id, shiftSlot(s))
+
+  const height = (maxRow - minRow + 1) * 2 * u
+  return {
+    slots,
+    height,
+    nextLeft: nextLeft ? shiftSlot(nextLeft) : null,
+    nextRight: nextRight ? shiftSlot(nextRight) : null,
+  }
 }
