@@ -10,7 +10,13 @@
  *  - Banda (fila) k: centro vertical y = u + k·2u — deja UNA ficha de espacio
  *    visible entre filas; los dobles (±u) y los giros nunca rozan la fila contigua.
  *  - Giro (ficha de esquina): vertical, centrado entre dos bandas
- *    (y = centroBanda(k) + u) cruzando el hueco, pegada al extremo.
+ *    (y = centroBanda(k) + u) cruzando el hueco.
+ *
+ * Filas tensas: como el layout se recalcula con la cadena completa, cada banda
+ * sabe de antemano si dobla. Si dobla, el sobrante de la fila se reparte entre
+ * sus huecos para que el giro aterrice EXACTAMENTE pegado al borde exterior (o
+ * a la frontera central) y la fila siguiente arranque justo a su lado — sin
+ * dejar parches de fieltro vacío entre el borde y la esquina.
  *
  * Orientación de los valores: la cadena respeta board[i].right === board[i+1].left
  * en pantalla. En las filas "de ida" las fichas van sin espejo (el orden físico
@@ -20,7 +26,7 @@
  * que se dibuja con los valores intercambiados (arriba = right).
  *
  *  - Frontera central (x = W/2): los carriles impares de cada lado no la cruzan,
- *    así el lado izquierdo y derecho nunca se pisan.
+ *    así el lado izquierdo y derecho nunca se pisan (deja 2·GAP entre giros opuestos).
  */
 import type { BoardTile } from '@/lib/domino/types'
 
@@ -72,16 +78,23 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
   const aHalf = aDouble ? half : u
 
   /**
-   * Recorre un lado (side=+1 derecha, -1 izquierda) colocando fichas en bandas.
-   * Devuelve el slot "fantasma" donde caería la siguiente ficha (EndZone).
+   * Recorre un lado (side=+1 derecha, -1 izquierda) en dos fases:
+   *  A) reparte las fichas en bandas con el mismo cupo de siempre;
+   *  B) las posiciona tensando cada banda que dobla para que su giro quede
+   *     pegado a la frontera. Devuelve el slot "fantasma" del extremo.
    */
   const walk = (side: 1 | -1): Slot => {
-    let band = 0
-    // x = borde de contacto donde empieza la próxima ficha según su dirección
+    // ---------- Fase A: reparto en bandas ----------
+    interface Band {
+      items: { t: BoardTile; w: number }[]
+      corner: BoardTile | null
+    }
+    const bands: Band[] = [{ items: [], corner: null }]
+    let bi = 0
     let x = side === 1 ? cxc + aHalf + GAP : cxc - aHalf - GAP
+    const startX = x
     let i = safeAnchor + side
     const more = () => (side === 1 ? i < board.length : i >= 0)
-
     const dirOf = (b: number) => (b % 2 === 0 ? side : -side)
     // Reserva para la ficha de giro: toda fila deja sitio al final para poder
     // doblar sin pisar la última ficha colocada (hueco de una ficha vertical).
@@ -95,7 +108,7 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
       const lim = limitOf(b)
       return dirOf(b) === 1 ? xx + w <= lim : xx - w >= lim
     }
-    /** Borde izquierdo gx de la ficha de giro según banda y cursor. */
+    /** Posición compacta (adyacente a la cadena) del giro de la banda b. */
     const cornerPos = (b: number, xx: number): number => {
       if (b % 2 === 0) {
         // giro pegado al borde exterior del lado
@@ -108,42 +121,164 @@ export function layoutSnake(board: BoardTile[], W: number, u: number, anchorIdx:
     while (more()) {
       const t = board[i]
       const w = t.isDouble ? u : 2 * u
-      const dir = dirOf(band)
-      if (fits(w, band, x)) {
-        slots.set(t.id, {
-          cx: dir === 1 ? x + w / 2 : x - w / 2,
-          cy: cy(band),
-          vertical: t.isDouble,
-          // Fila de ida (dir === side): orden físico = orden de cadena, sin espejo.
-          // Fila de vuelta (dir !== side): cadena en orden inverso, se espeja.
-          flip: dir !== side && !t.isDouble,
-          corner: false,
-        })
-        maxBand = Math.max(maxBand, band)
-        x += (dir === 1 ? 1 : -1) * (w + GAP)
+      if (fits(w, bi, x)) {
+        bands[bi].items.push({ t, w })
+        x += (dirOf(bi) === 1 ? 1 : -1) * (w + GAP)
       } else {
         // La ficha no cabe: SE DOBLA en la esquina (vertical, cruzando el hueco).
-        // En el lado izquierdo el contacto con la fila previa es por la mitad
-        // izquierda de la ficha previa → el giro se dibuja con valores intercambiados.
-        const gx = cornerPos(band, x)
-        slots.set(t.id, { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: side === -1, corner: true })
-        maxBand = Math.max(maxBand, band + 1)
-        band++
-        const nd = dirOf(band)
+        bands[bi].corner = t
+        // El cursor de la banda siguiente se calcula desde la posición FINAL
+        // del giro: tensada contra el borde físico en bandas pares CON fichas
+        // (Fase B la coloca ahí), compacta en impares y bandas vacías. Así la
+        // Fase A y la Fase B comparten exactamente la misma geometría.
+        const gx =
+          bi % 2 === 0 && bands[bi].items.length > 0 ? (side === 1 ? W - u : 0) : cornerPos(bi, x)
+        bi++
+        bands.push({ items: [], corner: null })
+        const nd = dirOf(bi)
         x = nd === 1 ? gx + u + GAP : gx - GAP
       }
       i += side
     }
 
-    // Slot fantasma: dónde caería la siguiente ficha de este extremo
-    const dir = dirOf(band)
-    if (fits(2 * u, band, x)) {
-      maxBand = Math.max(maxBand, band)
-      return { cx: dir === 1 ? x + u : x - u, cy: cy(band), vertical: false, flip: dir !== side, corner: false }
+    // ---------- Fase B: posicionado con filas tensas ----------
+    // "start" = borde de contacto del primer elemento de la banda (ya separa GAP).
+    let start = startX
+    const last = bands.length - 1
+    // cursor de fin de cada banda: borde de contacto del siguiente elemento
+    let endCursor = startX
+    let endBand = 0
+
+    for (let k = 0; k < bands.length; k++) {
+      const { items, corner } = bands[k]
+      const sgn = dirOf(k) // +1 la banda crece hacia la derecha, -1 hacia la izquierda
+      // Frontera lejana: borde exterior del tablero en bandas pares, frontera
+      // central (con GAP de cortesía) en impares.
+      const far = k % 2 === 0 ? (side === 1 ? W : 0) : side === 1 ? cxc + GAP : cxc - GAP
+      const N = items.length
+
+      // Bandas abiertas y pliegues en la franja central: COMPACTAS (el hueco
+      // sobrante es espacio de mesa, no de cadena). Solo se tensan las bandas
+      // que doblan contra el borde físico del tablero.
+      if (!corner || k % 2 === 1) {
+        let edge = start
+        for (const { t, w } of items) {
+          const x0 = sgn === 1 ? edge : edge - w
+          slots.set(t.id, {
+            cx: x0 + w / 2,
+            cy: cy(k),
+            vertical: t.isDouble,
+            // Fila de ida (sgn === side): sin espejo. Vuelta: espejada.
+            flip: sgn !== side && !t.isDouble,
+            corner: false,
+          })
+          maxBand = Math.max(maxBand, k)
+          edge = sgn === 1 ? x0 + w + GAP : x0 - GAP
+        }
+        if (corner) {
+          const gx = cornerPos(k, edge)
+          slots.set(corner.id, {
+            cx: gx + half,
+            cy: cy(k) + step / 2,
+            vertical: true,
+            flip: side === -1,
+            corner: true,
+          })
+          maxBand = Math.max(maxBand, k + 1)
+          const nd = dirOf(k + 1)
+          endCursor = nd === 1 ? gx + u + GAP : gx - GAP
+          endBand = k + 1
+          start = endCursor
+        } else {
+          endCursor = edge
+          endBand = k
+          start = edge
+        }
+        continue
+      }
+
+      if (N === 0) {
+        // Giro sin fichas en la banda (doble pliegue): adyacente a la cadena.
+        const gx = cornerPos(k, start)
+        slots.set(corner.id, {
+          cx: gx + half,
+          cy: cy(k) + step / 2,
+          vertical: true,
+          flip: side === -1,
+          corner: true,
+        })
+        maxBand = Math.max(maxBand, k + 1)
+        const nd = dirOf(k + 1)
+        endCursor = nd === 1 ? gx + u + GAP : gx - GAP
+        endBand = k + 1
+        start = endCursor
+        continue
+      }
+
+      // Banda par que dobla contra el BORDE FÍSICO: se TENSA. El sobrante se
+      // reparte a partes iguales entre los huecos internos (entre fichas + antes
+      // del giro; el hueco de arranque ya va incorporado en "start") para que
+      // el giro aterrice exactamente pegado al borde.
+      const sumW = items.reduce((acc, it) => acc + it.w, 0)
+      const natural = sumW + N * GAP + u // huecos: N-1 internos + 1 del giro
+      const available = Math.abs(far - start)
+      const extra = Math.max(available - natural, 0)
+      const g = GAP + extra / N
+
+      let edge = start
+      for (const { t, w } of items) {
+        const x0 = sgn === 1 ? edge : edge - w
+        slots.set(t.id, {
+          cx: x0 + w / 2,
+          cy: cy(k),
+          vertical: t.isDouble,
+          flip: sgn !== side && !t.isDouble,
+          corner: false,
+        })
+        maxBand = Math.max(maxBand, k)
+        edge = sgn === 1 ? x0 + w + g : x0 - g
+      }
+      // Giro pegado a la frontera lejana
+      const gx = sgn === 1 ? far - u : far
+      slots.set(corner.id, {
+        cx: gx + half,
+        cy: cy(k) + step / 2,
+        vertical: true,
+        flip: side === -1,
+        corner: true,
+      })
+      maxBand = Math.max(maxBand, k + 1)
+      const nd = dirOf(k + 1)
+      endCursor = nd === 1 ? gx + u + GAP : gx - GAP
+      endBand = k + 1
+      start = endCursor
     }
-    const gx = cornerPos(band, x)
-    maxBand = Math.max(maxBand, band + 1)
-    return { cx: gx + half, cy: cy(band) + step / 2, vertical: true, flip: side === -1, corner: true }
+
+    // ---------- Slot fantasma: dónde caería la siguiente ficha del extremo ----------
+    const dir = dirOf(endBand)
+    if (fits(2 * u, endBand, endCursor)) {
+      maxBand = Math.max(maxBand, endBand)
+      return {
+        cx: dir === 1 ? endCursor + u : endCursor - u,
+        cy: cy(endBand),
+        vertical: false,
+        flip: dir !== side,
+        corner: false,
+      }
+    }
+    // La siguiente ficha doblaría: contra el borde físico aterrizaría tensada
+    // (pegada al borde); en la franja central o banda vacía, adyacente.
+    const lastBand = bands[last]
+    let gx: number
+    if (lastBand.corner === null && lastBand.items.length > 0 && endBand % 2 === 0) {
+      const sgn = dirOf(endBand)
+      const far = endBand % 2 === 0 ? (side === 1 ? W : 0) : side === 1 ? cxc + GAP : cxc - GAP
+      gx = sgn === 1 ? far - u : far
+    } else {
+      gx = cornerPos(endBand, endCursor)
+    }
+    maxBand = Math.max(maxBand, endBand + 1)
+    return { cx: gx + half, cy: cy(endBand) + step / 2, vertical: true, flip: side === -1, corner: true }
   }
 
   const nextRight = walk(1)
