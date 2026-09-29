@@ -4,21 +4,30 @@
  * La ficha de APERTURA (ancla) se planta en el CENTRO exacto de la mesa y la
  * cadena crece en ambos sentidos desde ella:
  *  - Brazo DERECHO (board[ancla..n-1]): crece hacia la derecha en la fila
- *    central; al llegar al borde dobla hacia ABAJO (fila 1, 2, 3…) como
- *    serpiente.
+ *    central; al llegar al borde dobla hacia ABAJO (fila 1, 2, 3…).
  *  - Brazo IZQUIERDO (board[0..ancla] recorrido al revés): crece hacia la
  *    izquierda en la fila central; al llegar al borde dobla hacia ARRIBA
  *    (fila -1, -2…).
  *  - Al ocupar cada brazo franjas de filas DISJUNTAS (uno baja, el otro sube)
  *    jamás se cruzan: no hay colisiones ni huecos de frontera.
  *
+ * GIROS PEGADOS A LA ESQUINA:
+ *  - La ficha de giro (perpendicular) se planta SIEMPRE pegada al borde físico
+ *    de la mesa (x=0 o x=W-u), nunca donde el cursor se quedó sin espacio.
+ *  - La fila que dobla se TENSA: el sobrante (lo que sobró antes del borde)
+ *    se reparte de forma UNIFORME entre todos sus huecos (entre fichas y el
+ *    hueco previo al giro), de modo que la cadena llega hasta la esquina sin
+ *    dejar fieltro vacío. La mitad de la ficha de giro llena en cada fila el
+ *    hueco de media ficha horizontal junto al borde.
+ *  - Las filas que NO doblan (fin del brazo) quedan compactas (gap GAP).
+ *
  * Geometría:
  *  - u: unidad de ficha. Horizontal: 2u × u · Vertical (dobles y giros): u × 2u.
  *  - Fila k: centro vertical y = shift + k·2u. Una ficha de fieltro entre filas;
  *    los dobles (perpendiculares) y los giros nunca rozan la fila contigua.
- *  - Giro (ficha de esquina): vertical, centrado entre dos filas; arriba
- *    muestra `left` y abajo `right` (igual en ambos brazos, porque el giro del
- *    brazo izquierdo deja la fila que abandona en su mitad INFERIOR).
+ *  - Giro: vertical, centrado entre dos filas; arriba muestra `left` y abajo
+ *    `right` (igual en ambos brazos, porque el giro del brazo izquierdo deja
+ *    la fila que abandona en su mitad INFERIOR).
  *
  * Orientación de los valores: la cadena respeta board[i].right === board[i+1].left
  * en pantalla. Regla general por brazo: las filas que avanzan en el sentido
@@ -58,12 +67,18 @@ export interface SnakeLayout {
 
 const GAP = 2
 
-interface PathResult {
-  slots: Map<string, Slot>
-  /** fila más baja alcanzada (los giros cuentan como fila k+rowStep) */
-  maxRow: number
-  /** fila más alta alcanzada */
+/** Segmento de fila: fichas tendidas en la fila k + giro de esquina opcional. */
+interface Seg {
+  k: number
+  dir: 1 | -1
+  tiles: BoardTile[]
+  corner: BoardTile | null
+}
+
+interface ArmPlan {
+  segs: Seg[]
   minRow: number
+  maxRow: number
 }
 
 interface ArmOptions {
@@ -77,69 +92,119 @@ interface ArmOptions {
   rowStep: 1 | -1
 }
 
+const tileW = (t: BoardTile, u: number): number => (t.isDouble ? u : 2 * u)
+
 /**
- * Tiende UN brazo (en orden desde el ancla) sobre su serpiente.
- * Devuelve el slot de cada ficha y el rango de filas usado.
+ * FASE A — reparte las fichas del brazo (en orden desde el ancla) en segmentos
+ * de fila, decidiendo dónde dobla la cadena. Mientras queden fichas en el
+ * brazo, cada fila reserva u + GAP al final para que el giro quepa pegado.
  */
-function pathArm(tiles: BoardTile[], W: number, u: number, opts: ArmOptions): PathResult {
-  const slots = new Map<string, Slot>()
-  const step = 2 * u
-  const half = u / 2
-  // La fila k siempre está en y = cy0 + k·step: k negativos (brazo izquierdo)
-  // quedan ARRIBA del centro y k positivos (brazo derecho) ABAJO. rowStep solo
-  // decide hacia qué fila avanza cada brazo (kNext = k + rowStep).
-  const cyOf = (k: number) => opts.cy0 + k * step
-  let maxRow = 0
+function planArm(tiles: BoardTile[], W: number, u: number, opts: ArmOptions): ArmPlan {
+  const segs: Seg[] = []
   let minRow = 0
-  if (tiles.length === 0 || W < 2 * u) return { slots, maxRow, minRow }
+  let maxRow = 0
+  if (tiles.length === 0 || W < 2 * u) return { segs, minRow, maxRow }
 
   let k = 0
   let dir: 1 | -1 = opts.startDir
   let cursor = opts.cursor
+  let seg: Seg = { k, dir, tiles: [], corner: null }
 
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i]
-    const w = t.isDouble ? u : 2 * u
-    // Reserva de giro: mientras queden fichas en el brazo, la fila guarda
-    // espacio u + GAP al final para que el giro quepa pegado a la última ficha.
+    const w = tileW(t, u)
     const reserve = i < tiles.length - 1 ? u + GAP : 0
     const fits = dir === 1 ? cursor + w + reserve <= W : cursor - w - reserve >= 0
 
     if (fits) {
-      const x0 = dir === 1 ? cursor : cursor - w
+      seg.tiles.push(t)
+      cursor += dir === 1 ? w + GAP : -(w + GAP)
+    } else {
+      // Giro de esquina: la ficha se planta PERPENDICULAR pegada al borde.
+      seg.corner = t
+      segs.push(seg)
+      const kNext = k + opts.rowStep
+      maxRow = Math.max(maxRow, k, kNext)
+      minRow = Math.min(minRow, k, kNext)
+      k = kNext
+      dir = dir === 1 ? -1 : 1
+      // La siguiente fila arranca pegada a la mitad del giro que queda en ella.
+      cursor = dir === 1 ? u + GAP : W - u - GAP
+      seg = { k, dir, tiles: [], corner: null }
+    }
+  }
+  if (seg.tiles.length > 0) segs.push(seg)
+  return { segs, minRow, maxRow }
+}
+
+/**
+ * FASE B — posiciona los segmentos. Las filas que doblan se TENSAN: el
+ * sobrante hasta el borde se reparte de forma uniforme entre todos los huecos
+ * de la fila (entre fichas y el hueco previo al giro), de modo que el giro
+ * queda PEGADO al borde y no queda fieltro vacío.
+ */
+function placeArm(
+  segs: Seg[],
+  W: number,
+  u: number,
+  opts: ArmOptions,
+  cyOf: (k: number) => number
+): Map<string, Slot> {
+  const slots = new Map<string, Slot>()
+  let first = true
+
+  for (const seg of segs) {
+    const dir = seg.dir
+    // Arranque del segmento: el primero usa el cursor inicial del brazo; los
+    // siguientes salen pegados a la mitad del giro anterior (en el borde).
+    let cursor: number
+    if (first) {
+      cursor = opts.cursor
+      first = false
+    } else {
+      cursor = dir === 1 ? u + GAP : W - u - GAP
+    }
+
+    const n = seg.tiles.length
+    let gap = GAP
+    if (seg.corner && n > 0) {
+      // Espacio disponible para las fichas de la fila (el giro ocupa la
+      // última u pegada al borde). Sobrante repartido entre n huecos:
+      // (n-1) internos + el hueco previo al giro.
+      const sumW = seg.tiles.reduce((s, t) => s + tileW(t, u), 0)
+      const avail = dir === 1 ? W - u - cursor : cursor - u
+      const leftover = avail - sumW - n * GAP
+      if (leftover > 0) gap = GAP + leftover / n
+    }
+
+    let c = cursor
+    for (const t of seg.tiles) {
+      const w = tileW(t, u)
+      const x0 = dir === 1 ? c : c - w
       slots.set(t.id, {
         cx: x0 + w / 2,
-        cy: cyOf(k),
+        cy: cyOf(seg.k),
         vertical: t.isDouble,
         // Fila en el sentido inicial del brazo: sin espejo.
         // Fila de vuelta: espejada (los dobles son simétricos, no la necesitan).
         flip: dir !== opts.startDir && !t.isDouble,
         corner: false,
       })
-      maxRow = Math.max(maxRow, k)
-      minRow = Math.min(minRow, k)
-      cursor = dir === 1 ? x0 + w + GAP : x0 - GAP
-    } else {
-      // Giro de esquina: vertical al final de la fila, cruzando a la fila
-      // contigua (abajo si el brazo baja, arriba si sube). Arriba = left,
-      // abajo = right en ambos brazos.
-      const gx = dir === 1 ? Math.min(cursor, W - u) : Math.max(cursor - u, 0)
-      const kNext = k + opts.rowStep
-      slots.set(t.id, {
-        cx: gx + half,
-        cy: cyOf(k) + opts.rowStep * u,
+      c = dir === 1 ? x0 + w + gap : x0 - gap
+    }
+    if (seg.corner) {
+      // Giro PEGADO AL BORDE: su mitad en esta fila llena el hueco de media
+      // ficha horizontal junto a la esquina.
+      slots.set(seg.corner.id, {
+        cx: dir === 1 ? W - u / 2 : u / 2,
+        cy: cyOf(seg.k) + opts.rowStep * u,
         vertical: true,
         flip: false,
         corner: true,
       })
-      maxRow = Math.max(maxRow, kNext)
-      minRow = Math.min(minRow, kNext)
-      k = kNext
-      dir = dir === 1 ? -1 : 1
-      cursor = dir === 1 ? gx + u + GAP : gx - GAP
     }
   }
-  return { slots, maxRow, minRow }
+  return slots
 }
 
 /**
@@ -175,39 +240,43 @@ export function layoutSnake(
   const { rightSeq, leftSeq } = armSequences(board, anchorIdx)
 
   // cy0 provisional (0); al final se desplaza todo para que la fila superior empiece en 0
-  const cy0 = 0
+  const step = 2 * u
+  const cyOf = (k: number) => 0 + k * step
   // El ancla se coloca a mano, EXACTAMENTE en el centro (nunca es giro).
   // Ambos brazos excluyen el ancla y arrancan pegados a sus bordes.
-  const anchorSlot: Slot = { cx, cy: cy0, vertical: anchor.isDouble, flip: false, corner: false }
-  const armR: ArmOptions = { cursor: cx + ahw + GAP, startDir: 1, cy0, rowStep: 1 }
-  const armL: ArmOptions = { cursor: cx - ahw - GAP, startDir: -1, cy0, rowStep: -1 }
+  const anchorSlot: Slot = { cx, cy: 0, vertical: anchor.isDouble, flip: false, corner: false }
+  const armR: ArmOptions = { cursor: cx + ahw + GAP, startDir: 1, cy0: 0, rowStep: 1 }
+  const armL: ArmOptions = { cursor: cx - ahw - GAP, startDir: -1, cy0: 0, rowStep: -1 }
 
-  const right = pathArm(rightSeq.slice(1), W, u, armR)
-  const left = pathArm(leftSeq, W, u, armL)
+  const rightRest = rightSeq.slice(1)
+  const planR = planArm(rightRest, W, u, armR)
+  const planL = planArm(leftSeq, W, u, armL)
+  const slotsR = placeArm(planR.segs, W, u, armR, cyOf)
+  const slotsL = placeArm(planL.segs, W, u, armL, cyOf)
 
   // Zonas de colocación: tendemos cada brazo con una ficha virtual en su
   // extremo y leemos dónde aterriza. Es la posición EXACTA de destino.
   const ghostR: BoardTile = { id: '__ghost_right__', left: 0, right: 0, isDouble: false }
-  const withRight = pathArm([...rightSeq.slice(1), ghostR], W, u, armR)
-  const nextRight = withRight.slots.get(ghostR.id) ?? null
+  const planRG = planArm([...rightRest, ghostR], W, u, armR)
+  const nextRight = placeArm(planRG.segs, W, u, armR, cyOf).get(ghostR.id) ?? null
 
   const ghostL: BoardTile = { id: '__ghost_left__', left: 0, right: 0, isDouble: false }
-  const withLeft = pathArm([...leftSeq, ghostL], W, u, armL)
-  const nextLeft = withLeft.slots.get(ghostL.id) ?? null
+  const planLG = planArm([...leftSeq, ghostL], W, u, armL)
+  const nextLeft = placeArm(planLG.segs, W, u, armL, cyOf).get(ghostL.id) ?? null
 
   // Desplazamiento vertical: la fila más alta (podría ser negativa, brazo
   // izquierdo hacia arriba) queda con su banda empezando en y=0.
-  const minRow = Math.min(0, left.minRow, withLeft.minRow)
-  const maxRow = Math.max(0, right.maxRow, left.maxRow, withRight.maxRow, withLeft.maxRow)
-  const shift = u - minRow * 2 * u
+  const minRow = Math.min(0, planL.minRow, planLG.minRow)
+  const maxRow = Math.max(0, planR.maxRow, planL.maxRow, planRG.maxRow, planLG.maxRow)
+  const shift = u - minRow * step
 
   const slots = new Map<string, Slot>()
   const shiftSlot = (s: Slot): Slot => ({ ...s, cy: s.cy + shift })
   slots.set(anchor.id, shiftSlot(anchorSlot))
-  for (const [id, s] of right.slots) slots.set(id, shiftSlot(s))
-  for (const [id, s] of left.slots) slots.set(id, shiftSlot(s))
+  for (const [id, s] of slotsR) slots.set(id, shiftSlot(s))
+  for (const [id, s] of slotsL) slots.set(id, shiftSlot(s))
 
-  const height = (maxRow - minRow + 1) * 2 * u
+  const height = (maxRow - minRow + 1) * step
   return {
     slots,
     height,
