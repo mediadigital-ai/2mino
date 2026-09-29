@@ -62,3 +62,4 @@ Caddyfile
 /mini-services/
 /.zscripts/
 worklog.md
+package-lock.json
