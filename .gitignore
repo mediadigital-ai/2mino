@@ -55,7 +55,8 @@ server.log
 # artefactos del entorno de desarrollo local (no forman parte de la app)
 Caddyfile
 /db/
-/scripts/
+/scripts/*
+!/scripts/test-snake-corners.ts
 /tests/
 /examples/
 /download/
